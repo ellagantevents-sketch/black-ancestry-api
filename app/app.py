@@ -7,19 +7,18 @@ import os
 app = Flask(__name__)
 CORS(app)
 
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip().replace("\n", "").replace("\r", "")
-
-
 def get_db_connection():
-    return psycopg2.connect(DATABASE_URL)
-
+    return psycopg2.connect(
+        host=os.getenv("DB_HOST", "").strip(),
+        port=os.getenv("DB_PORT", "5432").strip(),
+        dbname=os.getenv("DB_NAME", "postgres").strip(),
+        user=os.getenv("DB_USER", "").strip(),
+        password=os.getenv("DB_PASSWORD", "").strip()
+    )
 
 @app.route("/")
 def home():
-    return jsonify({
-        "status": "Black Ancestry Census API Running"
-    })
-
+    return jsonify({"status": "Black Ancestry Census API Running"})
 
 @app.route("/search", methods=["GET"])
 def search_people():
@@ -52,11 +51,7 @@ def search_people():
     cur.close()
     conn.close()
 
-    return jsonify({
-        "count": len(results),
-        "results": results
-    })
-
+    return jsonify({"count": len(results), "results": results})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
