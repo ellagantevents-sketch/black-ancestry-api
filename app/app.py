@@ -7,7 +7,7 @@ import os
 app = Flask(__name__)
 CORS(app)
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip().replace("\n", "").replace("\r", "")
 
 
 def get_db_connection():
