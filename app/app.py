@@ -30,7 +30,7 @@ def search_people():
 
     sql = """
         SELECT *
-        FROM mississippi_people
+        FROM people
         WHERE 1=1
     """
     params = []
