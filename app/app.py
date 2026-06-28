@@ -92,6 +92,52 @@ def get_person(person_id):
     person["family_trees"] = family_tree
 
     return jsonify(person)
+@app.route("/correction", methods=["POST"])
+def submit_correction():
+    data = request.get_json()
 
+    person_id = data.get("person_id")
+    field_name = data.get("field_name")
+    original_value = data.get("original_value")
+    corrected_value = data.get("corrected_value")
+    correction_reason = data.get("correction_reason")
+    submitted_by = data.get("submitted_by")
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    cur.execute(
+        """
+        INSERT INTO profile_corrections (
+            person_id,
+            field_name,
+            original_value,
+            corrected_value,
+            correction_reason,
+            submitted_by
+        )
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING *;
+        """,
+        (
+            person_id,
+            field_name,
+            original_value,
+            corrected_value,
+            correction_reason,
+            submitted_by
+        )
+    )
+
+    correction = cur.fetchone()
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "success": True,
+        "correction": correction
+    })
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
