@@ -20,64 +20,40 @@ def get_db_connection():
 def home():
     return jsonify({"status": "Black Ancestry Census API Running"})
 
-@app.route("/search", methods=["GET"])
-def search_people():
-    last_name = request.args.get("last_name", "").strip()
-    first_name = request.args.get("first_name", "").strip()
-
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
-    sql = """
-        SELECT *
-        FROM people
-        WHERE 1=1
-    """
-    params = []
-
-    if last_name:
-        sql += " AND last_name ILIKE %s"
-        params.append(last_name)
-
-    if first_name:
-        sql += " AND first_name ILIKE %s"
-        params.append(first_name)
-
-    sql += " ORDER BY last_name, first_name LIMIT 100;"
-
-    cur.execute(sql, params)
-    results = cur.fetchall()
-
-    cur.close()
-    conn.close()
-
-    return jsonify({"count": len(results), "results": results})
 @app.route("/person/<int:person_id>", methods=["GET"])
 def get_person(person_id):
 
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
+    # Get the person's profile
     cur.execute(
         "SELECT * FROM people WHERE id = %s;",
         (person_id,)
     )
 
     person = cur.fetchone()
-cur.execute("""
-SELECT *
-FROM family_tree_links
-WHERE person_id = %s;
-""", (person_id,))
 
-family_tree = cur.fetchall()
+    if not person:
+        cur.close()
+        conn.close()
+        return jsonify({"error": "Person not found"}), 404
+
+    # Get any linked family trees
+    cur.execute("""
+        SELECT *
+        FROM family_tree_links
+        WHERE person_id = %s;
+    """, (person_id,))
+
+    family_tree = cur.fetchall()
+
     cur.close()
     conn.close()
 
-    if person:
-       person["family_trees"] = family_tree
+    person["family_trees"] = family_tree
 
-return jsonify(person)
+    return jsonify(person)
     else:
         return jsonify({"error": "Person not found"}), 404
 if __name__ == "__main__":
