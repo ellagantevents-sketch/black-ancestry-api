@@ -64,12 +64,20 @@ def get_person(person_id):
     )
 
     person = cur.fetchone()
+cur.execute("""
+SELECT *
+FROM family_tree_links
+WHERE person_id = %s;
+""", (person_id,))
 
+family_tree = cur.fetchall()
     cur.close()
     conn.close()
 
     if person:
-        return jsonify(person)
+       person["family_trees"] = family_tree
+
+return jsonify(person)
     else:
         return jsonify({"error": "Person not found"}), 404
 if __name__ == "__main__":
