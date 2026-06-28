@@ -66,7 +66,7 @@ def get_person(person_id):
         conn.close()
         return jsonify({"error": "Person not found"}), 404
 
-    cur.execute("SELECT * FROM family_tree_links WHERE person_id = %s;", (person_id,))
+    cur.execute("SELECT * FROM family_tree_links WHERE person_id = %s ORDER BY id;", (person_id,))
     family_tree = cur.fetchall()
 
     cur.close()
@@ -192,6 +192,79 @@ def create_family_tree_link():
     conn.close()
 
     return jsonify({"success": True, "family_tree_link": link})
+
+
+@app.route("/family-tree-link/<int:link_id>/update", methods=["POST"])
+def update_family_tree_link(link_id):
+    data = request.get_json() or {}
+
+    allowed_fields = [
+        "tree_name",
+        "tree_person_name",
+        "tree_person_id",
+        "relationship_role"
+    ]
+
+    updates = []
+    values = []
+
+    for field in allowed_fields:
+        if field in data:
+            updates.append(f"{field} = %s")
+            values.append(data[field])
+
+    if not updates:
+        return jsonify({"success": False, "error": "No valid fields provided"}), 400
+
+    values.append(link_id)
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    sql = f"""
+        UPDATE family_tree_links
+        SET {", ".join(updates)}
+        WHERE id = %s
+        RETURNING *;
+    """
+
+    cur.execute(sql, values)
+    updated_link = cur.fetchone()
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    if not updated_link:
+        return jsonify({"success": False, "error": "Family tree link not found"}), 404
+
+    return jsonify({"success": True, "family_tree_link": updated_link})
+
+
+@app.route("/family-tree-link/<int:link_id>/delete", methods=["POST", "DELETE"])
+def delete_family_tree_link(link_id):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    cur.execute(
+        """
+        DELETE FROM family_tree_links
+        WHERE id = %s
+        RETURNING *;
+        """,
+        (link_id,)
+    )
+
+    deleted_link = cur.fetchone()
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    if not deleted_link:
+        return jsonify({"success": False, "error": "Family tree link not found"}), 404
+
+    return jsonify({"success": True, "deleted_family_tree_link": deleted_link})
 
 
 @app.route("/correction", methods=["POST"])
