@@ -18,15 +18,51 @@ def get_db_connection():
 
 @app.route("/")
 def home():
-    return jsonify({"status": "Black Ancestry Census API Running"})
+    return jsonify({
+        "status": "Black Ancestry Census API Running"
+    })
 
-@app.route("/person/<int:person_id>", methods=["GET"])
-def get_person(person_id):
+@app.route("/search", methods=["GET"])
+def search_people():
+    last_name = request.args.get("last_name", "").strip()
+    first_name = request.args.get("first_name", "").strip()
 
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-    # Get the person's profile
+    sql = """
+        SELECT *
+        FROM people
+        WHERE 1=1
+    """
+    params = []
+
+    if last_name:
+        sql += " AND last_name ILIKE %s"
+        params.append(last_name)
+
+    if first_name:
+        sql += " AND first_name ILIKE %s"
+        params.append(first_name)
+
+    sql += " ORDER BY last_name, first_name LIMIT 100;"
+
+    cur.execute(sql, params)
+    results = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "count": len(results),
+        "results": results
+    })
+
+@app.route("/person/<int:person_id>", methods=["GET"])
+def get_person(person_id):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
     cur.execute(
         "SELECT * FROM people WHERE id = %s;",
         (person_id,)
@@ -39,12 +75,14 @@ def get_person(person_id):
         conn.close()
         return jsonify({"error": "Person not found"}), 404
 
-    # Get any linked family trees
-    cur.execute("""
+    cur.execute(
+        """
         SELECT *
         FROM family_tree_links
         WHERE person_id = %s;
-    """, (person_id,))
+        """,
+        (person_id,)
+    )
 
     family_tree = cur.fetchall()
 
@@ -54,7 +92,6 @@ def get_person(person_id):
     person["family_trees"] = family_tree
 
     return jsonify(person)
-    else:
-        return jsonify({"error": "Person not found"}), 404
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
