@@ -52,6 +52,25 @@ def search_people():
     conn.close()
 
     return jsonify({"count": len(results), "results": results})
+@app.route("/person/<int:person_id>", methods=["GET"])
+def get_person(person_id):
 
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    cur.execute(
+        "SELECT * FROM people WHERE id = %s;",
+        (person_id,)
+    )
+
+    person = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if person:
+        return jsonify(person)
+    else:
+        return jsonify({"error": "Person not found"}), 404
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
