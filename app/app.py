@@ -3,6 +3,7 @@ from flask_cors import CORS
 import psycopg2
 import psycopg2.extras
 import os
+import requests
 
 app = Flask(__name__)
 CORS(app)
@@ -82,34 +83,15 @@ def update_person(person_id):
     data = request.get_json() or {}
 
     allowed_fields = [
-        "first_name",
-        "middle_name",
-        "last_name",
-        "suffix_name",
-        "birth_month",
-        "birth_day",
-        "birth_year",
-        "sex",
-        "race",
-        "mother_first_name",
-        "mother_middle_name",
-        "mother_last_name",
-        "father_first_name",
-        "father_middle_name",
-        "father_last_name",
-        "birth_city",
-        "birth_state",
-        "profile_photo",
-        "photo_url",
-        "primary_photo_url",
-        "cover_photo_url",
-        "biography",
-        "story",
-        "ai_summary",
-        "profile_status",
-        "profile_completed",
-        "photo_count",
-        "verified"
+        "first_name", "middle_name", "last_name", "suffix_name",
+        "birth_month", "birth_day", "birth_year",
+        "sex", "race",
+        "mother_first_name", "mother_middle_name", "mother_last_name",
+        "father_first_name", "father_middle_name", "father_last_name",
+        "birth_city", "birth_state",
+        "profile_photo", "photo_url", "primary_photo_url", "cover_photo_url",
+        "biography", "story", "ai_summary",
+        "profile_status", "profile_completed", "photo_count", "verified"
     ]
 
     updates = []
@@ -167,22 +149,12 @@ def create_family_tree_link():
     cur.execute(
         """
         INSERT INTO family_tree_links (
-            person_id,
-            tree_name,
-            tree_person_name,
-            tree_person_id,
-            relationship_role
+            person_id, tree_name, tree_person_name, tree_person_id, relationship_role
         )
         VALUES (%s, %s, %s, %s, %s)
         RETURNING *;
         """,
-        (
-            person_id,
-            tree_name,
-            tree_person_name,
-            tree_person_id,
-            relationship_role
-        )
+        (person_id, tree_name, tree_person_name, tree_person_id, relationship_role)
     )
 
     link = cur.fetchone()
@@ -198,12 +170,7 @@ def create_family_tree_link():
 def update_family_tree_link(link_id):
     data = request.get_json() or {}
 
-    allowed_fields = [
-        "tree_name",
-        "tree_person_name",
-        "tree_person_id",
-        "relationship_role"
-    ]
+    allowed_fields = ["tree_name", "tree_person_name", "tree_person_id", "relationship_role"]
 
     updates = []
     values = []
@@ -284,24 +251,13 @@ def submit_correction():
     cur.execute(
         """
         INSERT INTO profile_corrections (
-            person_id,
-            field_name,
-            original_value,
-            corrected_value,
-            correction_reason,
-            submitted_by
+            person_id, field_name, original_value, corrected_value,
+            correction_reason, submitted_by
         )
         VALUES (%s, %s, %s, %s, %s, %s)
         RETURNING *;
         """,
-        (
-            person_id,
-            field_name,
-            original_value,
-            corrected_value,
-            correction_reason,
-            submitted_by
-        )
+        (person_id, field_name, original_value, corrected_value, correction_reason, submitted_by)
     )
 
     correction = cur.fetchone()
@@ -311,6 +267,128 @@ def submit_correction():
     conn.close()
 
     return jsonify({"success": True, "correction": correction})
+
+
+@app.route("/import-census-images/ms-1950", methods=["GET"])
+def import_ms_1950_census_images():
+    url = "https://nara-1950-census.s3.us-east-2.amazonaws.com/metadata/json/ms.json"
+
+    response = requests.get(url, timeout=60)
+    response.raise_for_status()
+    data = response.json()
+
+    state = data.get("state", "Mississippi")
+    state_abbreviation = data.get("abbreviation", "MS")
+
+    inserted = 0
+    skipped = 0
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    counties = data.get("county/city", [])
+
+    for county_item in counties:
+        county_name = county_item.get("name")
+
+        for enum in county_item.get("enumeration", []):
+            ed = enum.get("ed")
+            description = enum.get("description")
+            roll = enum.get("roll")
+
+            schedule_image = enum.get("schedule_image", {})
+            folder = schedule_image.get("folder")
+            files = schedule_image.get("files", [])
+
+            for image_file in files:
+                if not folder or not image_file:
+                    skipped += 1
+                    continue
+
+                image_url = f"https://nara-1950-census.s3.us-east-2.amazonaws.com/{folder}/{image_file}"
+
+                cur.execute(
+                    """
+                    INSERT INTO census_images (
+                        census_year,
+                        state,
+                        state_abbreviation,
+                        county,
+                        enumeration_district,
+                        description,
+                        roll,
+                        folder,
+                        image_file,
+                        image_url,
+                        source
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                    """,
+                    (
+                        1950,
+                        state,
+                        state_abbreviation,
+                        county_name,
+                        ed,
+                        description,
+                        roll,
+                        folder,
+                        image_file,
+                        image_url,
+                        "NARA 1950 Census AWS"
+                    )
+                )
+
+                inserted += 1
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "success": True,
+        "message": "Mississippi 1950 census image metadata imported.",
+        "inserted": inserted,
+        "skipped": skipped
+    })
+
+
+@app.route("/census-images/search", methods=["GET"])
+def search_census_images():
+    county = request.args.get("county", "").strip()
+    ed = request.args.get("ed", "").strip()
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    sql = """
+        SELECT *
+        FROM census_images
+        WHERE census_year = 1950
+        AND state_abbreviation = 'MS'
+    """
+    params = []
+
+    if county:
+        sql += " AND county ILIKE %s"
+        params.append(county)
+
+    if ed:
+        sql += " AND enumeration_district ILIKE %s"
+        params.append(ed)
+
+    sql += " ORDER BY county, enumeration_district, image_file LIMIT 100;"
+
+    cur.execute(sql, params)
+    results = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "count": len(results),
+        "results": results
+    })
 
 
 if __name__ == "__main__":
