@@ -347,6 +347,37 @@ def search_census_images():
     conn.close()
 
     return jsonify({"count": len(results), "results": results})
+@app.route("/import-jobs", methods=["GET"])
+def get_import_jobs():
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
+    cur.execute("""
+        SELECT
+            id,
+            census_year,
+            state_abbreviation,
+            state_name,
+            county,
+            status,
+            inserted_count,
+            skipped_count,
+            error_message,
+            started_at,
+            completed_at,
+            updated_at
+        FROM import_jobs
+        ORDER BY county;
+    """)
+
+    jobs = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "count": len(jobs),
+        "jobs": jobs
+    })
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
