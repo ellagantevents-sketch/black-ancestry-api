@@ -203,6 +203,116 @@ def delete_family_tree_link(link_id):
     return jsonify({"success": True, "deleted_family_tree_link": deleted})
 
 @app.route("/import-census-images/ms-1950", methods=["GET"])
+def import_one_ms_1950_county(county_requested):
+    url = "https://nara-1950-census.s3.us-east-2.amazonaws.com/metadata/json/ms.json"
+
+    response = requests.get(url, timeout=60)
+    response.raise_for_status()
+    data = response.json()
+
+    state = data.get("state", "Mississippi")
+    state_abbreviation = data.get("abbreviation", "MS")
+    counties = data.get("county/city", [])
+
+    matched_county = None
+    for county_item in counties:
+        if county_item.get("name", "").lower() == county_requested.lower():
+            matched_county = county_item
+            break
+
+    if not matched_county:
+        return jsonify({"success": False, "error": f"County not found: {county_requested}"}), 404
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    county_name = matched_county.get("name")
+
+    cur.execute("""
+        UPDATE import_jobs
+        SET status = 'running', started_at = NOW(), updated_at = NOW(), error_message = NULL
+        WHERE census_year = 1950 AND state_abbreviation = 'MS' AND county = %s;
+    """, (county_name,))
+
+    inserted = 0
+    skipped = 0
+
+    try:
+        for enum in matched_county.get("enumeration", []):
+            ed = enum.get("ed")
+            description = enum.get("description")
+            roll = enum.get("roll")
+
+            schedule_image = enum.get("schedule_image", {})
+            folder = schedule_image.get("folder")
+            files = schedule_image.get("files", [])
+
+            for image_file in files:
+                if not folder or not image_file:
+                    skipped += 1
+                    continue
+
+                image_url = f"https://nara-1950-census.s3.us-east-2.amazonaws.com/{folder}/{image_file}"
+
+                cur.execute("SELECT id FROM census_images WHERE image_url = %s LIMIT 1;", (image_url,))
+
+                if cur.fetchone():
+                    skipped += 1
+                    continue
+
+                cur.execute("""
+                    INSERT INTO census_images (
+                        census_year, state, state_abbreviation, county,
+                        enumeration_district, description, roll,
+                        folder, image_file, image_url, source
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                """, (
+                    1950, state, state_abbreviation, county_name,
+                    ed, description, roll,
+                    folder, image_file, image_url,
+                    "NARA 1950 Census AWS"
+                ))
+
+                inserted += 1
+
+        cur.execute("""
+            UPDATE import_jobs
+            SET status = 'complete',
+                inserted_count = inserted_count + %s,
+                skipped_count = skipped_count + %s,
+                completed_at = NOW(),
+                updated_at = NOW()
+            WHERE census_year = 1950 AND state_abbreviation = 'MS' AND county = %s;
+        """, (inserted, skipped, county_name))
+
+        conn.commit()
+
+    except Exception as e:
+        conn.rollback()
+        cur.execute("""
+            UPDATE import_jobs
+            SET status = 'error',
+                error_message = %s,
+                updated_at = NOW()
+            WHERE census_year = 1950 AND state_abbreviation = 'MS' AND county = %s;
+        """, (str(e), county_name))
+        conn.commit()
+
+        cur.close()
+        conn.close()
+
+        return jsonify({"success": False, "county": county_name, "error": str(e)}), 500
+
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "success": True,
+        "county": county_name,
+        "inserted": inserted,
+        "skipped": skipped
+    })
 def import_ms_1950_census_images_by_county():
     county_requested = request.args.get("county", "").strip()
 
