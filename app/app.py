@@ -378,6 +378,33 @@ def get_import_jobs():
     return jsonify({
         "count": len(jobs),
         "jobs": jobs
-    })
+    })@app.route("/harvest/ms-1950/remaining", methods=["GET"])
+def harvest_remaining_ms_1950():
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    cur.execute("""
+        SELECT county
+        FROM import_jobs
+        WHERE census_year = 1950
+          AND state_abbreviation = 'MS'
+          AND status <> 'complete'
+        ORDER BY county
+        LIMIT 1;
+    """)
+
+    job = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not job:
+        return jsonify({
+            "success": True,
+            "message": "All Mississippi counties are already complete."
+        })
+
+    county = job["county"]
+
+    return import_one_ms_1950_county(county)
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
