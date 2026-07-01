@@ -224,11 +224,11 @@ def harvest_remaining_ms_1950():
 
     return import_one_ms_1950_county(job["county"])
 
-
 @app.route("/census-images/search", methods=["GET"])
 def search_census_images():
+
     county = request.args.get("county", "").strip()
-   city = request.args.get("city", "").strip()
+    city = request.args.get("city", "").strip()
     ed = request.args.get("ed", "").strip()
 
     conn = get_db_connection()
@@ -240,14 +240,17 @@ def search_census_images():
         WHERE census_year = 1950
         AND state_abbreviation = 'MS'
     """
+
     params = []
 
     if county:
         sql += " AND county ILIKE %s"
         params.append(county)
-if city:
-    sql += " AND description ILIKE %s"
-    params.append(f"%{city}%")
+
+    if city:
+        sql += " AND description ILIKE %s"
+        params.append(f"%{city}%")
+
     if ed:
         sql += " AND enumeration_district ILIKE %s"
         params.append(ed)
@@ -260,7 +263,10 @@ if city:
     cur.close()
     conn.close()
 
-    return jsonify({"count": len(results), "results": results})
+    return jsonify({
+        "count": len(results),
+        "results": results
+    })
 
 
 if __name__ == "__main__":
