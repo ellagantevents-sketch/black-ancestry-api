@@ -267,7 +267,52 @@ def search_census_images():
         "count": len(results),
         "results": results
     })
+@app.route("/census-locations", methods=["GET"])
+def get_census_locations():
+    county = request.args.get("county", "").strip()
 
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    if not county:
+        cur.execute("""
+            SELECT DISTINCT county
+            FROM census_images
+            WHERE census_year = 1950
+              AND state_abbreviation = 'MS'
+            ORDER BY county;
+        """)
+
+        counties = [row["county"] for row in cur.fetchall()]
+
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            "state": "Mississippi",
+            "counties": counties
+        })
+
+    cur.execute("""
+        SELECT DISTINCT description
+        FROM census_images
+        WHERE census_year = 1950
+          AND state_abbreviation = 'MS'
+          AND county ILIKE %s
+          AND description IS NOT NULL
+        ORDER BY description;
+    """, (county,))
+
+    descriptions = [row["description"] for row in cur.fetchall()]
+
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "state": "Mississippi",
+        "county": county,
+        "descriptions": descriptions
+    })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
