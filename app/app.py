@@ -228,6 +228,7 @@ def harvest_remaining_ms_1950():
 @app.route("/census-images/search", methods=["GET"])
 def search_census_images():
     county = request.args.get("county", "").strip()
+   city = request.args.get("city", "").strip()
     ed = request.args.get("ed", "").strip()
 
     conn = get_db_connection()
@@ -244,7 +245,9 @@ def search_census_images():
     if county:
         sql += " AND county ILIKE %s"
         params.append(county)
-
+if city:
+    sql += " AND description ILIKE %s"
+    params.append(f"%{city}%")
     if ed:
         sql += " AND enumeration_district ILIKE %s"
         params.append(ed)
