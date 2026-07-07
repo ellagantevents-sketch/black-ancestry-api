@@ -4,7 +4,6 @@ import psycopg2
 import psycopg2.extras
 import os
 import re
-import tempfile
 
 app = Flask(__name__)
 CORS(app)
@@ -62,16 +61,11 @@ def get_person(person_id):
     cur.execute("SELECT * FROM people WHERE id = %s;", (person_id,))
     person = cur.fetchone()
 
-    if not person:
-        cur.close()
-        conn.close()
-        return jsonify({"error": "Person not found"}), 404
-
-    cur.execute("SELECT * FROM family_tree_links WHERE person_id = %s ORDER BY id;", (person_id,))
-    person["family_trees"] = cur.fetchall()
-
     cur.close()
     conn.close()
+
+    if not person:
+        return jsonify({"error": "Person not found"}), 404
 
     return jsonify(person)
 
@@ -108,15 +102,15 @@ def parse_gedcom_text(text):
     current_type = None
     current_event = None
 
-    lines = text.splitlines()
-
-    for line in lines:
+    for line in text.splitlines():
         line = line.strip()
         if not line:
             continue
 
         parts = line.split(" ", 2)
         level = parts[0]
+        tag = parts[1] if len(parts) > 1 else ""
+        value = parts[2] if len(parts) > 2 else ""
 
         if level == "0":
             current_event = None
@@ -149,17 +143,10 @@ def parse_gedcom_text(text):
                         "children": []
                     }
 
-            else:
-                current_id = None
-                current_type = None
-
             continue
 
         if not current_id:
             continue
-
-        tag = parts[1] if len(parts) > 1 else ""
-        value = parts[2] if len(parts) > 2 else ""
 
         if current_type == "INDI" and current_id in people:
             person = people[current_id]
@@ -206,7 +193,7 @@ def parse_gedcom_text(text):
 
     relationships = []
 
-    for fam_id, fam in families.items():
+    for fam in families.values():
         husband = fam.get("husband")
         wife = fam.get("wife")
         children = fam.get("children", [])
@@ -329,6 +316,22 @@ def gedcom_confirm():
         new_person_id = cur.fetchone()["id"]
         temp_to_person_id[person.get("temp_id")] = new_person_id
 
+        cur.execute(
+            """
+            INSERT INTO family_tree_people (
+                tree_id,
+                person_id,
+                gedcom_temp_id
+            )
+            VALUES (%s, %s, %s);
+            """,
+            (
+                tree_id,
+                new_person_id,
+                person.get("temp_id")
+            )
+        )
+
     imported_relationships = 0
 
     for rel in relationships:
@@ -367,6 +370,83 @@ def gedcom_confirm():
         "tree_id": tree_id,
         "people_imported": len(temp_to_person_id),
         "relationships_imported": imported_relationships
+    })
+
+
+@app.route("/family-tree/<int:tree_id>", methods=["GET"])
+def get_family_tree(tree_id):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    cur.execute(
+        """
+        SELECT *
+        FROM family_trees
+        WHERE id = %s;
+        """,
+        (tree_id,)
+    )
+
+    tree = cur.fetchone()
+
+    if not tree:
+        cur.close()
+        conn.close()
+        return jsonify({"success": False, "error": "Tree not found"}), 404
+
+    cur.execute(
+        """
+        SELECT
+            p.*,
+            ftp.gedcom_temp_id
+        FROM family_tree_people ftp
+        JOIN people p ON p.id = ftp.person_id
+        WHERE ftp.tree_id = %s
+        ORDER BY p.last_name, p.first_name;
+        """,
+        (tree_id,)
+    )
+
+    people = cur.fetchall()
+
+    cur.execute(
+        """
+        SELECT
+            fr.id,
+            fr.tree_id,
+            fr.person_id,
+            fr.related_person_id,
+            fr.relationship_type,
+
+            p1.first_name AS person_first_name,
+            p1.middle_name AS person_middle_name,
+            p1.last_name AS person_last_name,
+
+            p2.first_name AS related_first_name,
+            p2.middle_name AS related_middle_name,
+            p2.last_name AS related_last_name
+
+        FROM family_relationships fr
+        JOIN people p1 ON p1.id = fr.person_id
+        JOIN people p2 ON p2.id = fr.related_person_id
+        WHERE fr.tree_id = %s
+        ORDER BY fr.relationship_type;
+        """,
+        (tree_id,)
+    )
+
+    relationships = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "success": True,
+        "tree": tree,
+        "people_count": len(people),
+        "relationships_count": len(relationships),
+        "people": people,
+        "relationships": relationships
     })
 
 
